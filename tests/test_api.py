@@ -10,6 +10,7 @@ from custom_components.fintra.api import (
     FintraConnectionError,
     normalize_host,
 )
+from custom_components.fintra.models import Child
 
 
 class FakeResponse:
@@ -159,3 +160,22 @@ async def test_login_reports_unknown_intermediate_response() -> None:
 def test_normalize_host(value: str, expected: str) -> None:
     """Test school names and legacy addresses normalize to hostnames."""
     assert normalize_host(value) == expected
+
+
+async def test_linked_plans_with_unknown_format_raise_connection_error() -> None:
+    """Test parser failures do not silently become empty plan sensors."""
+    client = FintraClient(MagicMock(), "school.example", "parent", "secret")
+    client._async_get_text = AsyncMock(
+        side_effect=[
+            (
+                '<a href="/parent/641/Ellieitem/weeklyplansandhomework/'
+                'item/class/35-2026">Klasse</a>'
+            ),
+            "<html><body>Unknown plan markup</body></html>",
+        ]
+    )
+
+    with pytest.raises(FintraConnectionError, match="ukendt format"):
+        await client._async_fetch_plans(
+            Child("641", "Ellie", "Ellie 2.KL."), week=35, year=2026
+        )

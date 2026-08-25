@@ -41,7 +41,7 @@ som et brugerdefineret repository:
 5. Vælg kategorien **Integration** og tryk **Tilføj**.
 6. Find **Fintra** i HACS, vælg **Download**, og genstart Home Assistant.
 
-Ved releases anbefales et Git-tag som `v0.1.2`, der svarer til versionen i
+Ved releases anbefales et Git-tag som `v0.1.3`, der svarer til versionen i
 `custom_components/fintra/manifest.json`.
 
 ## Manuel installation

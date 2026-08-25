@@ -199,7 +199,9 @@ class FintraClient:
             plan_html = await self._async_get_text(link.url)
             plan = parse_week_plan(plan_html, year=year)
             if plan is None:
-                continue
+                raise FintraConnectionError(
+                    f"{link.plan_type.upper()}-ugeplanen havde et ukendt format"
+                )
             source_urls.append(link.url)
             if link.plan_type == PLAN_TYPE_CLASS:
                 class_plan = plan

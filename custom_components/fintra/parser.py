@@ -109,6 +109,10 @@ def parse_plan_links(
 def parse_week_plan(html: str, *, year: int) -> WeekPlan | None:
     """Parse a weekly plan using the current 2026 page structure."""
     soup = BeautifulSoup(html, "html.parser")
+    embedded_plan = _parse_embedded_week_plan(soup)
+    if embedded_plan is not None:
+        return embedded_plan
+
     container = soup.select_one(".sk-weekly-plan-container")
     if container is None:
         return None
@@ -143,6 +147,113 @@ def parse_week_plan(html: str, *, year: int) -> WeekPlan | None:
         days.append(DayPlan(day_name, parsed_date, text, lessons))
 
     return WeekPlan(title=title, general=general, days=tuple(days))
+
+
+def _parse_embedded_week_plan(soup: BeautifulSoup) -> WeekPlan | None:
+    settings_element = soup.find(
+        attrs={"data-clientlogic-settings-weeklyplansapp": True}
+    )
+    if not isinstance(settings_element, Tag):
+        return None
+    raw_settings = settings_element.get(
+        "data-clientlogic-settings-weeklyplansapp"
+    )
+    if not isinstance(raw_settings, str):
+        return None
+    try:
+        settings = json.loads(raw_settings)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(settings, dict):
+        return None
+
+    selected = settings.get("SelectedPlan")
+    if not isinstance(selected, dict):
+        return None
+    class_or_group = str(selected.get("ClassOrGroup") or "").strip()
+    formatted_week = str(selected.get("FormattedWeek") or "").strip()
+    title = "Ugeplan"
+    if class_or_group and formatted_week:
+        title = f"Ugeplan for {class_or_group} - uge {formatted_week}"
+
+    general_plan = selected.get("GeneralPlan")
+    general = _embedded_lesson_plan_text(general_plan)
+    days: list[DayPlan] = []
+    daily_plans = selected.get("DailyPlans")
+    if isinstance(daily_plans, list):
+        for daily_plan in daily_plans:
+            if not isinstance(daily_plan, dict):
+                continue
+            date_value = str(daily_plan.get("Date") or "")
+            try:
+                parsed_date = date.fromisoformat(date_value)
+            except ValueError:
+                parsed_date = None
+            lessons = _embedded_schedule(daily_plan.get("Schedule"))
+            plan_text = _embedded_lesson_plan_text(daily_plan)
+            schedule_text = "\n".join(
+                f"{lesson.start} - {lesson.end}\n{lesson.subject}".rstrip()
+                for lesson in lessons
+            )
+            text = _normalize_text(f"{plan_text}\n{schedule_text}")
+            days.append(
+                DayPlan(
+                    day_name=str(daily_plan.get("Day") or "Dag"),
+                    date=parsed_date,
+                    text=text,
+                    lessons=lessons,
+                )
+            )
+
+    if not general and not days:
+        return None
+    return WeekPlan(title=title, general=general, days=tuple(days))
+
+
+def _embedded_lesson_plan_text(plan: object) -> str:
+    if not isinstance(plan, dict):
+        return ""
+    lesson_plans = plan.get("LessonPlans")
+    if not isinstance(lesson_plans, list):
+        return ""
+
+    blocks: list[str] = []
+    for lesson_plan in lesson_plans:
+        if not isinstance(lesson_plan, dict):
+            continue
+        subject = lesson_plan.get("Subject")
+        subject_title = (
+            str(subject.get("Title") or "").strip()
+            if isinstance(subject, dict)
+            else ""
+        )
+        if subject_title.casefold() == "uden angivelse af fag":
+            subject_title = ""
+        content = _html_to_multiline_text(str(lesson_plan.get("Content") or ""))
+        block = _normalize_text(f"{subject_title}\n{content}")
+        if block:
+            blocks.append(block)
+    return "\n\n".join(blocks)
+
+
+def _embedded_schedule(value: object) -> tuple[Lesson, ...]:
+    if not isinstance(value, list):
+        return ()
+    lessons: list[Lesson] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        match = _TIME_RANGE.search(str(item.get("TimeString") or ""))
+        if match is None:
+            continue
+        lessons.append(
+            Lesson(
+                start=match["start"].replace(".", ":"),
+                end=match["end"].replace(".", ":"),
+                subject=str(item.get("Title") or "").strip(),
+            )
+        )
+    return tuple(lessons)
 
 
 def parse_conversations(html: str) -> tuple[Conversation, ...]:
@@ -256,6 +367,12 @@ def _parse_message_datetime(value: str) -> datetime | None:
 
 def _html_to_text(value: str) -> str:
     return BeautifulSoup(value, "html.parser").get_text(" ", strip=True)
+
+
+def _html_to_multiline_text(value: str) -> str:
+    return _normalize_text(
+        BeautifulSoup(value, "html.parser").get_text("\n", strip=True)
+    )
 
 
 def _normalize_text(value: str) -> str:

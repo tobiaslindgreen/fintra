@@ -92,6 +92,75 @@ def test_parse_week_plan_days_general_and_lessons() -> None:
     assert "14.45/15.00" in plan.days[2].text
 
 
+def test_parse_week_plan_from_embedded_vue_settings() -> None:
+    settings = {
+        "SelectedPlan": {
+            "ClassOrGroup": "2.KL.",
+            "FormattedWeek": "35-2026",
+            "GeneralPlan": {
+                "LessonPlans": [
+                    {
+                        "Subject": {"Title": "Uden angivelse af fag"},
+                        "Content": (
+                            "<p>Husk læsebogen gerne skal være pakket ind.</p>"
+                            "<p>Eleverne får frilæsningsbøger med.</p>"
+                        ),
+                    }
+                ]
+            },
+            "DailyPlans": [
+                {
+                    "Date": "2026-08-24",
+                    "Day": "Mandag",
+                    "LessonPlans": [
+                        {
+                            "Subject": {"Title": "Dansk"},
+                            "Content": (
+                                "<p>Husk at læsebogen skal være pakket ind "
+                                "og lægges i tasken.</p>"
+                            ),
+                        }
+                    ],
+                    "Schedule": [
+                        {"TimeString": "12:30 - 13:15", "Title": "2.KL. DAN"}
+                    ],
+                },
+                {
+                    "Date": "2026-08-27",
+                    "Day": "Torsdag",
+                    "LessonPlans": [
+                        {
+                            "Subject": {"Title": "Uden angivelse af fag"},
+                            "Content": (
+                                "<p>Vi tager på tur til Verdenskortet i Klejtrup.</p>"
+                                "<p>Vi er hjemme ca. 14.45/15.00.</p>"
+                            ),
+                        }
+                    ],
+                    "Schedule": [],
+                },
+            ],
+        }
+    }
+    page = (
+        '<div data-clientlogic-settings-weeklyplansapp="'
+        + html.escape(json.dumps(settings), quote=True)
+        + '"></div><script id="sk-weekly-plan-template"></script>'
+    )
+
+    plan = parse_week_plan(page, year=2026)
+
+    assert plan is not None
+    assert plan.title == "Ugeplan for 2.KL. - uge 35-2026"
+    assert "Husk læsebogen gerne" in plan.general
+    assert "frilæsningsbøger" in plan.general
+    assert plan.days[0].date == date(2026, 8, 24)
+    assert "Dansk\nHusk at læsebogen" in plan.days[0].text
+    assert "12:30 - 13:15\n2.KL. DAN" in plan.days[0].text
+    assert plan.days[0].lessons[0].subject == "2.KL. DAN"
+    assert "Verdenskortet i Klejtrup" in plan.days[1].text
+
+
 def test_parse_conversations_and_actionable_message() -> None:
     settings = {
         "Conversations": [
