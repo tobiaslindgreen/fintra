@@ -1,0 +1,66 @@
+{
+    "title": "Fintra",
+    "config": {
+        "step": {
+            "user": {
+                "title": "Connect to ForældreIntra",
+                "description": "Enter the school's ForældreIntra address and your credentials.",
+                "data": {
+                    "host": "School address",
+                    "username": "Username",
+                    "password": "Password"
+                }
+            },
+            "children": {
+                "title": "Select children and content",
+                "description": "Fintra creates daily and weekly sensors for each selected child.",
+                "data": {
+                    "children": "Children",
+                    "include_messages": "Use messages for important reminders"
+                }
+            },
+            "reauth_confirm": {
+                "title": "Sign in again",
+                "description": "The ForældreIntra password must be updated.",
+                "data": {
+                    "password": "New password"
+                }
+            }
+        },
+        "error": {
+            "cannot_connect": "ForældreIntra could not be reached or returned an unknown format.",
+            "invalid_auth": "The username or password was rejected.",
+            "invalid_host": "Enter a valid HTTPS address for the school's ForældreIntra site.",
+            "select_child": "Select at least one child."
+        },
+        "abort": {
+            "already_configured": "This ForældreIntra account is already configured.",
+            "reauth_successful": "The password was updated."
+        }
+    },
+    "options": {
+        "step": {
+            "init": {
+                "title": "Fintra settings",
+                "description": "Select the children and message data the integration should use.",
+                "data": {
+                    "children": "Children",
+                    "include_messages": "Use messages for important reminders"
+                }
+            }
+        },
+        "error": {
+            "select_child": "Select at least one child."
+        }
+    },
+    "entity": {
+        "sensor": {
+            "day_plan": {
+                "name": "Day"
+            },
+            "week_plan": {
+                "name": "Week"
+            }
+        }
+    }
+}

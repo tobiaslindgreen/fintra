@@ -1,0 +1,66 @@
+{
+    "title": "Fintra",
+    "config": {
+        "step": {
+            "user": {
+                "title": "Forbind til ForældreIntra",
+                "description": "Angiv skolens ForældreIntra-adresse og dine loginoplysninger.",
+                "data": {
+                    "host": "Skolens adresse",
+                    "username": "Brugernavn",
+                    "password": "Adgangskode"
+                }
+            },
+            "children": {
+                "title": "Vælg børn og indhold",
+                "description": "Fintra opretter en dags- og ugesensor for hvert valgt barn.",
+                "data": {
+                    "children": "Børn",
+                    "include_messages": "Brug beskeder til vigtige huskepunkter"
+                }
+            },
+            "reauth_confirm": {
+                "title": "Log ind igen",
+                "description": "Adgangskoden til ForældreIntra skal opdateres.",
+                "data": {
+                    "password": "Ny adgangskode"
+                }
+            }
+        },
+        "error": {
+            "cannot_connect": "ForældreIntra kunne ikke kontaktes eller havde et ukendt format.",
+            "invalid_auth": "Brugernavn eller adgangskode blev afvist.",
+            "invalid_host": "Angiv en gyldig HTTPS-adresse til skolens ForældreIntra.",
+            "select_child": "Vælg mindst ét barn."
+        },
+        "abort": {
+            "already_configured": "Denne ForældreIntra-konto er allerede konfigureret.",
+            "reauth_successful": "Adgangskoden er opdateret."
+        }
+    },
+    "options": {
+        "step": {
+            "init": {
+                "title": "Indstillinger for Fintra",
+                "description": "Vælg hvilke børn og beskeddata integrationen skal bruge.",
+                "data": {
+                    "children": "Børn",
+                    "include_messages": "Brug beskeder til vigtige huskepunkter"
+                }
+            }
+        },
+        "error": {
+            "select_child": "Vælg mindst ét barn."
+        }
+    },
+    "entity": {
+        "sensor": {
+            "day_plan": {
+                "name": "Dag"
+            },
+            "week_plan": {
+                "name": "Uge"
+            }
+        }
+    }
+}
