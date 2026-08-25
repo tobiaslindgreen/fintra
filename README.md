@@ -41,7 +41,7 @@ som et brugerdefineret repository:
 5. Vælg kategorien **Integration** og tryk **Tilføj**.
 6. Find **Fintra** i HACS, vælg **Download**, og genstart Home Assistant.
 
-Ved releases anbefales et Git-tag som `v0.1.1`, der svarer til versionen i
+Ved releases anbefales et Git-tag som `v0.1.2`, der svarer til versionen i
 `custom_components/fintra/manifest.json`.
 
 ## Manuel installation
@@ -137,6 +137,8 @@ indeholder:
 
 Sensorens state er ISO-ugen, eksempelvis `2026-W35`. Attributterne indeholder:
 
+- `ugeplan_tekst` med den komplette klasse- og SFO-ugeplan som almindelig tekst;
+- `klasse_ugeplan_tekst` og `sfo_ugeplan_tekst` som separate tekstfelter;
 - ugens første og sidste dato;
 - generelle tekster fra klasse- og SFO-planen;
 - alle hverdage med tekst og lektioner;
@@ -146,6 +148,12 @@ Sensorens state er ISO-ugen, eksempelvis `2026-W35`. Attributterne indeholder:
 Home Assistant begrænser en sensors state til 255 tegn. Derfor ligger det
 strukturerede indhold i attributterne, mens state holdes kort og egnet til
 automations.
+
+Tekstattributterne filtrerer ikke ugeplanens indhold. De indeholder både
+**Generelt**, alle ugedage inklusive allerede passerede dage, lektier,
+påmindelser, aktiviteter og skemaoplysninger. `ugeplan_tekst` kan derfor bruges
+direkte som kontekst til en lokal AI-model uden først at samle de strukturerede
+felter manuelt.
 
 ## Opdatering
 

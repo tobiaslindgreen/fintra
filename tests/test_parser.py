@@ -51,23 +51,45 @@ def test_parse_week_plan_days_general_and_lessons() -> None:
       <h3>Ugeplan for 2.KL. - uge 35-2026</h3>
       <div class="section">
         <div class="sk-weekly-plan-header-cell"><div><span class="sk-weekly-plan-day">Generelt</span></div></div>
-        <div><p>Husk læsebogen.</p></div>
+                <div>
+                    <p>Husk læsebogen gerne skal være pakket ind til på mandag.</p>
+                    <p>Eleverne får frilæsningsbøger med.</p>
+                </div>
+            </div>
+            <div class="section">
+                <div class="sk-weekly-plan-header-cell"><div><span class="sk-weekly-plan-day">Mandag</span><span class="sk-weekly-plan-date">24. aug.</span></div></div>
+                <div><p>Dansk</p><p>Husk at læsebogen skal være pakket ind og lægges i tasken.</p></div>
       </div>
       <div class="section">
         <div class="sk-weekly-plan-header-cell"><div><span class="sk-weekly-plan-day">Tirsdag</span><span class="sk-weekly-plan-date">25. aug.</span></div></div>
         <div><p>Emnedag starter.</p></div>
         <div><div><span>08:20 - 09:05</span><span>2.KL. DAN</span></div></div>
       </div>
+            <div class="section">
+                <div class="sk-weekly-plan-header-cell"><div><span class="sk-weekly-plan-day">Torsdag</span><span class="sk-weekly-plan-date">27. aug.</span></div></div>
+                <div>
+                    <p>Vi tager på tur til Verdenskortet i Klejtrup.</p>
+                    <p>Vi er hjemme ca. 14.45/15.00.</p>
+                </div>
+            </div>
     </div>
     """
 
     plan = parse_week_plan(page, year=2026)
 
     assert plan is not None
-    assert plan.general == "Husk læsebogen."
-    assert plan.days[0].date == date(2026, 8, 25)
-    assert plan.days[0].text == "Emnedag starter.\n08:20 - 09:05\n2.KL. DAN"
-    assert plan.days[0].lessons[0].subject == "2.KL. DAN"
+    assert plan.general == (
+        "Husk læsebogen gerne skal være pakket ind til på mandag.\n"
+        "Eleverne får frilæsningsbøger med."
+    )
+    assert plan.days[0].date == date(2026, 8, 24)
+    assert "lægges i tasken" in plan.days[0].text
+    assert plan.days[1].date == date(2026, 8, 25)
+    assert plan.days[1].text == "Emnedag starter.\n08:20 - 09:05\n2.KL. DAN"
+    assert plan.days[1].lessons[0].subject == "2.KL. DAN"
+    assert plan.days[2].date == date(2026, 8, 27)
+    assert "Verdenskortet i Klejtrup" in plan.days[2].text
+    assert "14.45/15.00" in plan.days[2].text
 
 
 def test_parse_conversations_and_actionable_message() -> None:

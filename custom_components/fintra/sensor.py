@@ -15,6 +15,7 @@ from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN
 from .coordinator import FintraCoordinator
+from .formatting import format_week_plan_text
 from .models import ChildData, DayPlan, MessageSignal, WeekPlan
 
 
@@ -111,10 +112,17 @@ def _week_attributes(data: ChildData) -> dict[str, Any]:
             if day.date is not None
         }
     )
+    class_text = format_week_plan_text(data.class_plan, "Klasse")
+    sfo_text = format_week_plan_text(data.sfo_plan, "SFO")
     return {
         "barn": data.child.name,
         "fra_dato": all_dates[0].isoformat() if all_dates else None,
         "til_dato": all_dates[-1].isoformat() if all_dates else None,
+        "ugeplan_tekst": "\n\n".join(
+            text for text in (class_text, sfo_text) if text
+        ),
+        "klasse_ugeplan_tekst": class_text,
+        "sfo_ugeplan_tekst": sfo_text,
         "generelt": {
             "klasse": _bounded(data.class_plan.general) if data.class_plan else "",
             "sfo": _bounded(data.sfo_plan.general) if data.sfo_plan else "",
