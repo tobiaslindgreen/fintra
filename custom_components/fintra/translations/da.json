@@ -4,9 +4,9 @@
         "step": {
             "user": {
                 "title": "Forbind til ForældreIntra",
-                "description": "Angiv skolens ForældreIntra-adresse og dine loginoplysninger.",
+                "description": "Angiv skolenavnet fra adressen før .m.skoleintra.dk samt dine loginoplysninger.",
                 "data": {
-                    "host": "Skolens adresse",
+                    "host": "Skolenavn",
                     "username": "Brugernavn",
                     "password": "Adgangskode"
                 }
@@ -30,7 +30,7 @@
         "error": {
             "cannot_connect": "ForældreIntra kunne ikke kontaktes eller havde et ukendt format.",
             "invalid_auth": "Brugernavn eller adgangskode blev afvist.",
-            "invalid_host": "Angiv en gyldig HTTPS-adresse til skolens ForældreIntra.",
+            "invalid_host": "Angiv et gyldigt skolenavn, eksempelvis lyngbjerggaardskolen.",
             "select_child": "Vælg mindst ét barn."
         },
         "abort": {

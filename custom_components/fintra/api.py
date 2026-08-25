@@ -21,6 +21,8 @@ from .parser import (
 )
 
 _PARENT_INDEX = re.compile(r"/parent/\d+/[^/]+/Index$")
+_SCHOOL_NAME = re.compile(r"^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$", re.IGNORECASE)
+_SAML_CONSUMER_PATH = "/sso/assertionconsumerservice"
 
 
 class FintraError(Exception):
@@ -36,10 +38,14 @@ class FintraConnectionError(FintraError):
 
 
 def normalize_host(value: str) -> str:
-    """Normalize a school hostname supplied by the user."""
+    """Normalize a school name or hostname supplied by the user."""
     candidate = value.strip().rstrip("/")
     if not candidate:
         raise ValueError("Host is empty")
+    if "." not in candidate and "://" not in candidate:
+        if not _SCHOOL_NAME.fullmatch(candidate):
+            raise ValueError("School name is invalid")
+        return f"{candidate.lower()}.m.skoleintra.dk"
     if "://" not in candidate:
         candidate = f"https://{candidate}"
     parsed = urlparse(candidate)
@@ -95,6 +101,10 @@ class FintraClient:
                 action, data=fields, allow_redirects=True
             )
             html = await self._read_response(response)
+            if self._is_login_response(response, html):
+                raise FintraAuthError("Brugernavn eller adgangskode blev afvist")
+
+            response, html = await self._async_submit_saml_form(response, html)
         except ClientError as err:
             raise FintraConnectionError("ForældreIntra kunne ikke kontaktes") from err
 
@@ -104,13 +114,37 @@ class FintraClient:
                 "Kontaktoplysninger skal bekræftes i ForældreIntra før opsætning"
             )
         if not _PARENT_INDEX.search(final_path):
-            raise FintraAuthError("Brugernavn eller adgangskode blev afvist")
+            raise FintraConnectionError("Loginforløbet havde et ukendt format")
 
         children = parse_children(html)
         if not children:
             raise FintraConnectionError("Ingen børn blev fundet på forsiden")
         self._logged_in = True
         return children
+
+    async def _async_submit_saml_form(
+        self, response: ClientResponse, html: str
+    ) -> tuple[ClientResponse, str]:
+        """Submit the browser-driven SAML assertion form when present."""
+        soup = BeautifulSoup(html, "html.parser")
+        for form in soup.find_all("form"):
+            action = urljoin(str(response.url), str(form.get("action") or response.url))
+            parsed_action = urlparse(action)
+            if (
+                parsed_action.hostname != self.host
+                or parsed_action.path.lower() != _SAML_CONSUMER_PATH
+                or form.find(attrs={"name": "SAMLResponse"}) is None
+            ):
+                continue
+            fields = {
+                str(field["name"]): str(field.get("value", ""))
+                for field in form.find_all("input", attrs={"name": True})
+            }
+            saml_response = await self._session.post(
+                action, data=fields, allow_redirects=True
+            )
+            return saml_response, await self._read_response(saml_response)
+        return response, html
 
     async def async_fetch_data(
         self,

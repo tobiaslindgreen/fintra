@@ -4,9 +4,9 @@
         "step": {
             "user": {
                 "title": "Connect to ForældreIntra",
-                "description": "Enter the school's ForældreIntra address and your credentials.",
+                "description": "Enter the school name shown before .m.skoleintra.dk and your credentials.",
                 "data": {
-                    "host": "School address",
+                    "host": "School name",
                     "username": "Username",
                     "password": "Password"
                 }
@@ -30,7 +30,7 @@
         "error": {
             "cannot_connect": "ForældreIntra could not be reached or returned an unknown format.",
             "invalid_auth": "The username or password was rejected.",
-            "invalid_host": "Enter a valid HTTPS address for the school's ForældreIntra site.",
+            "invalid_host": "Enter a valid school name, for example lyngbjerggaardskolen.",
             "select_child": "Select at least one child."
         },
         "abort": {

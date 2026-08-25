@@ -10,7 +10,7 @@ den enkelte skole.
 ## Funktioner
 
 - Opsætning direkte i Home Assistants brugerflade.
-- Valg af skole via skolens ForældreIntra-adresse.
+- Valg af skole ved kun at angive skolenavnet.
 - Automatisk opdagelse og valg af børn på forældrekontoen.
 - Klasseplaner og separate SFO-planer.
 - To sensorer pr. barn: **Dag** og **Uge**.
@@ -41,7 +41,7 @@ som et brugerdefineret repository:
 5. Vælg kategorien **Integration** og tryk **Tilføj**.
 6. Find **Fintra** i HACS, vælg **Download**, og genstart Home Assistant.
 
-Ved releases anbefales et Git-tag som `v0.1.0`, der svarer til versionen i
+Ved releases anbefales et Git-tag som `v0.1.1`, der svarer til versionen i
 `custom_components/fintra/manifest.json`.
 
 ## Manuel installation
@@ -58,24 +58,25 @@ efter **Fintra**.
 
 ### 1. Vælg skole
 
-Feltet **Skolens adresse** er adressen til skolens ForældreIntra-side. Både et
-hostname og en komplet HTTPS-adresse accepteres.
+I feltet **Skolenavn** skal du kun skrive den del af skolens ForældreIntra-
+adresse, der står før `.m.skoleintra.dk`.
 
 Eksempler:
 
 ```text
-minskole.m.skoleintra.dk
-https://minskole.m.skoleintra.dk/
+lyngbjerggaardskolen
 ```
 
-Skolens adresse kan normalt kopieres fra browserens adresselinje, når
-ForældreIntra åbnes. Fintra tillader kun HTTPS.
+Fintra omdanner automatisk værdien til
+`lyngbjerggaardskolen.m.skoleintra.dk`. Et komplet hostname eller en fuld
+HTTPS-adresse accepteres fortsat af hensyn til eksisterende opsætninger.
 
 ### 2. Log ind
 
 Angiv det almindelige ForældreIntra-brugernavn og adgangskoden. Fintra åbner
-loginformularen, medsender formularens skjulte sikkerhedsfelter og kontrollerer,
-at login ender på en gyldig forældreside.
+loginformularen, medsender formularens skjulte sikkerhedsfelter, gennemfører
+ForældreIntras SAML-logintrin og kontrollerer, at login ender på en gyldig
+forældreside.
 
 Adgangskoden gemmes i Home Assistants config-entry-lager på samme måde som
 andre integrationers loginoplysninger. Den skrives aldrig til Fintras log.
