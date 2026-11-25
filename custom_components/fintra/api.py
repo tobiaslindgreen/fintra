@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import date, timedelta
 import re
+from datetime import date, timedelta
 from typing import Any
 from urllib.parse import quote, urljoin, urlparse
 
@@ -74,45 +74,22 @@ class FintraClient:
 
     async def async_login(self) -> tuple[Child, ...]:
         """Log in and return children available to the account."""
+        self._logged_in = False
         try:
             response = await self._session.get(self._base_url, allow_redirects=True)
             html = await self._read_response(response)
-            soup = BeautifulSoup(html, "html.parser")
-            form = next(
-                (
-                    candidate
-                    for candidate in soup.find_all("form")
-                    if candidate.find(attrs={"name": "UserName"})
-                    and candidate.find(attrs={"name": "Password"})
-                ),
-                None,
-            )
-            if form is None:
-                raise FintraConnectionError("Loginformularen blev ikke fundet")
-
-            fields = {
-                str(field["name"]): str(field.get("value", ""))
-                for field in form.find_all("input", attrs={"name": True})
-            }
-            fields["UserName"] = self.username
-            fields["Password"] = self._password
-            action = urljoin(str(response.url), str(form.get("action") or response.url))
-            response = await self._session.post(
-                action, data=fields, allow_redirects=True
-            )
-            html = await self._read_response(response)
-            if self._is_login_response(response, html):
-                raise FintraAuthError("Brugernavn eller adgangskode blev afvist")
+            path = urlparse(str(response.url)).path
+            if not _PARENT_INDEX.search(path) and not self._is_contact_confirmation(
+                response
+            ):
+                response, html = await self._async_submit_login_form(response, html)
 
             response, html = await self._async_submit_saml_form(response, html)
+            response, html = await self._async_confirm_contacts(response, html)
         except ClientError as err:
             raise FintraConnectionError("ForældreIntra kunne ikke kontaktes") from err
 
         final_path = urlparse(str(response.url)).path
-        if final_path.endswith("/ConfirmContacts"):
-            raise FintraConnectionError(
-                "Kontaktoplysninger skal bekræftes i ForældreIntra før opsætning"
-            )
         if not _PARENT_INDEX.search(final_path):
             raise FintraConnectionError("Loginforløbet havde et ukendt format")
 
@@ -121,6 +98,161 @@ class FintraClient:
             raise FintraConnectionError("Ingen børn blev fundet på forsiden")
         self._logged_in = True
         return children
+
+    async def _async_submit_login_form(
+        self, response: ClientResponse, html: str
+    ) -> tuple[ClientResponse, str]:
+        """Submit credentials when the existing session needs a fresh login."""
+        soup = BeautifulSoup(html, "html.parser")
+        form = next(
+            (
+                candidate
+                for candidate in soup.find_all("form")
+                if candidate.find(attrs={"name": "UserName"})
+                and candidate.find(attrs={"name": "Password"})
+            ),
+            None,
+        )
+        if form is None:
+            raise FintraConnectionError("Loginformularen blev ikke fundet")
+        fields = {
+            str(field["name"]): str(field.get("value", ""))
+            for field in form.find_all("input", attrs={"name": True})
+        }
+        fields["UserName"] = self.username
+        fields["Password"] = self._password
+        action = urljoin(str(response.url), str(form.get("action") or response.url))
+        response = await self._session.post(action, data=fields, allow_redirects=True)
+        html = await self._read_response(response)
+        if self._is_login_response(response, html):
+            raise FintraAuthError("Brugernavn eller adgangskode blev afvist")
+        return response, html
+
+    @staticmethod
+    def _is_contact_confirmation(response: ClientResponse) -> bool:
+        """Recognize the contact gate, including an optional trailing slash."""
+        return (
+            urlparse(str(response.url))
+            .path.rstrip("/")
+            .lower()
+            .endswith("/confirmcontacts")
+        )
+
+    async def _async_confirm_contacts(
+        self, response: ClientResponse, html: str
+    ) -> tuple[ClientResponse, str]:
+        """Confirm existing contact values using the school's own HTML form."""
+        if self._is_contact_confirmation(response):
+            page_url = str(response.url)
+            if urlparse(page_url).netloc != urlparse(self._base_url).netloc:
+                raise FintraConnectionError(
+                    "Kontaktbekræftelsen havde en ukendt adresse"
+                )
+            soup = BeautifulSoup(html, "html.parser")
+            candidates = []
+            for form in soup.find_all("form"):
+                action = urljoin(page_url, str(form.get("action") or page_url))
+                if (
+                    urlparse(action).scheme != "https"
+                    or urlparse(action).netloc != urlparse(self._base_url).netloc
+                    or str(form.get("method", "get")).lower() != "post"
+                ):
+                    continue
+                submit = None
+                for button in form.find_all(["button", "input"]):
+                    kind = str(
+                        button.get(
+                            "type", "submit" if button.name == "button" else "text"
+                        )
+                    ).lower()
+                    if kind != "submit" or button.has_attr("disabled"):
+                        continue
+                    label = button.get_text(" ", strip=True) or str(
+                        button.get("value", "")
+                    )
+                    if re.search(
+                        r"\b(bekræft|confirm|godkend|fortsæt|continue|gem|save|ok)\b",
+                        label,
+                        re.IGNORECASE,
+                    ):
+                        submit = button
+                        break
+                if submit is not None:
+                    candidates.append((form, action, submit))
+            if len(candidates) != 1:
+                raise FintraConnectionError(
+                    "Kontaktbekræftelsens formular kunne ikke genkendes; "
+                    "bekræft kontaktoplysningerne manuelt i ForældreIntra"
+                )
+            form, action, submit = candidates[0]
+            fields: list[tuple[str, str]] = []
+            for field in form.find_all(
+                ["input", "select", "textarea"], attrs={"name": True}
+            ):
+                if field.has_attr("disabled") or field.find_parent(
+                    "fieldset", disabled=True
+                ):
+                    continue
+                name = str(field["name"])
+                kind = str(field.get("type", "text")).lower()
+                if field.name == "input":
+                    if kind in {"submit", "button", "reset", "image", "file"}:
+                        continue
+                    if kind in {"checkbox", "radio"} and not field.has_attr("checked"):
+                        continue
+                    fields.append(
+                        (
+                            name,
+                            str(
+                                field.get(
+                                    "value",
+                                    "on" if kind in {"checkbox", "radio"} else "",
+                                )
+                            ),
+                        )
+                    )
+                elif field.name == "textarea":
+                    fields.append((name, field.get_text()))
+                else:
+                    options = [
+                        option
+                        for option in field.find_all("option")
+                        if not option.has_attr("disabled")
+                        and not option.find_parent("optgroup", disabled=True)
+                    ]
+                    selected = [
+                        option for option in options if option.has_attr("selected")
+                    ]
+                    if not selected and not field.has_attr("multiple"):
+                        selected = options[:1]
+                    for option in selected:
+                        fields.append(
+                            (name, str(option.get("value", option.get_text())))
+                        )
+            if submit.get("name"):
+                fields.append((str(submit["name"]), str(submit.get("value", ""))))
+            # Respect a button-specific endpoint; never send personal data elsewhere.
+            action = urljoin(page_url, str(submit.get("formaction") or action))
+            if (
+                urlparse(action).scheme != "https"
+                or urlparse(action).netloc != urlparse(self._base_url).netloc
+                or str(submit.get("formmethod", "post")).lower() != "post"
+            ):
+                raise FintraConnectionError(
+                    "Kontaktbekræftelsen havde en ukendt adresse"
+                )
+            response = await self._session.post(
+                action, data=fields, allow_redirects=True
+            )
+            html = await self._read_response(response)
+            if self._is_login_response(response, html):
+                raise FintraAuthError("Sessionen er udløbet under kontaktbekræftelsen")
+            if self._is_contact_confirmation(response):
+                raise FintraConnectionError(
+                    "ForældreIntra accepterede ikke kontaktbekræftelsen; "
+                    "kontrollér kontaktoplysningerne manuelt"
+                )
+        return response, html
 
     async def _async_submit_saml_form(
         self, response: ClientResponse, html: str
@@ -166,9 +298,7 @@ class FintraClient:
                 child, week=iso_week, year=iso_year
             )
 
-        signals: dict[str, list[MessageSignal]] = {
-            child.key: [] for child in selected
-        }
+        signals: dict[str, list[MessageSignal]] = {child.key: [] for child in selected}
         if include_messages:
             await self._async_fetch_messages(selected, today=today, result=signals)
 
@@ -187,8 +317,7 @@ class FintraClient:
         self, child: Child, *, week: int, year: int
     ) -> tuple[WeekPlan | None, WeekPlan | None, tuple[str, ...]]:
         list_path = (
-            f"/parent/{child.child_id}/{child.slug}item/"
-            "weeklyplansandhomework/list"
+            f"/parent/{child.child_id}/{child.slug}item/weeklyplansandhomework/list"
         )
         html = await self._async_get_text(list_path)
         links = parse_plan_links(html, self._base_url, week=week, year=year)
@@ -219,9 +348,7 @@ class FintraClient:
         cutoff = today - timedelta(days=6)
         signal_cache: dict[str, MessageSignal | None] = {}
         for child in children:
-            inbox_path = (
-                f"/parent/{child.child_id}/{child.slug}/messages/conversations"
-            )
+            inbox_path = f"/parent/{child.child_id}/{child.slug}/messages/conversations"
             inbox = await self._async_get_text(inbox_path)
             for conversation in parse_conversations(inbox):
                 if conversation.key not in signal_cache:
@@ -233,7 +360,10 @@ class FintraClient:
                         signal = parse_message(payload)
                         if signal is None or signal.sent_at.date() < cutoff:
                             continue
-                        if latest_signal is None or signal.sent_at > latest_signal.sent_at:
+                        if (
+                            latest_signal is None
+                            or signal.sent_at > latest_signal.sent_at
+                        ):
                             latest_signal = signal
                     signal_cache[conversation.key] = latest_signal
                 signal = signal_cache[conversation.key]

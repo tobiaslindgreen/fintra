@@ -58,9 +58,7 @@ async def test_login_preserves_hidden_fields_and_discovers_children() -> None:
     assert [child.key for child in children] == ["641:Ellie", "712:Vester"]
     session.post.assert_awaited_once()
     request = session.post.await_args
-    assert request.args[0] == (
-        "https://school.example/Account/IdpLogin?partnerSp=test"
-    )
+    assert request.args[0] == ("https://school.example/Account/IdpLogin?partnerSp=test")
     assert request.kwargs["data"] == {
         "RoleType": "Parent",
         "__RequestVerificationToken": "csrf",
@@ -146,6 +144,163 @@ async def test_login_reports_unknown_intermediate_response() -> None:
 
     with pytest.raises(FintraConnectionError):
         await client.async_login()
+
+
+CONTACT_FORM = """
+<form method="post" action="/parent/ConfirmContacts">
+  <input type="hidden" name="__RequestVerificationToken" value="csrf-contact">
+  <input name="Email" value="parent@example.test">
+  <input name="Phone" value="12345678">
+  <input type="hidden" name="ReceiveSms" value="false">
+  <input type="checkbox" name="ReceiveSms" value="true" checked>
+  <input type="checkbox" name="Optional" value="true">
+  <input name="Disabled" value="ignored" disabled>
+  <textarea name="Address">Existing address</textarea>
+  <select name="Country"><option value="dk" selected>Danmark</option></select>
+  <button type="submit" name="command" value="edit">Rediger</button>
+  <button type="submit" name="command" value="confirm">Bekræft oplysninger</button>
+</form>
+"""
+
+
+async def test_login_confirms_contacts_after_saml() -> None:
+    """Continue daily refresh after confirming unchanged contact information."""
+    session = MagicMock()
+    session.get = AsyncMock(
+        return_value=FakeResponse(
+            "https://school.example/Account/IdpLogin",
+            '<form><input name="UserName"><input name="Password"></form>',
+        )
+    )
+    session.post = AsyncMock(
+        side_effect=[
+            FakeResponse(
+                "https://identity.example/login",
+                """
+        <form action="https://school.example/sso/assertionconsumerservice">
+          <input name="SAMLResponse" value="assertion">
+        </form>""",
+            ),
+            FakeResponse("https://school.example/parent/ConfirmContacts", CONTACT_FORM),
+            FakeResponse(
+                "https://school.example/parent/712/Vester/Index",
+                '<a href="/parent/712/Vester/Index">Vester</a>',
+            ),
+        ]
+    )
+    client = FintraClient(session, "school.example", "parent", "secret")
+
+    children = await client.async_login()
+
+    assert children[0].key == "712:Vester"
+    request = session.post.await_args_list[2]
+    assert request.args[0] == "https://school.example/parent/ConfirmContacts"
+    assert request.kwargs["data"] == [
+        ("__RequestVerificationToken", "csrf-contact"),
+        ("Email", "parent@example.test"),
+        ("Phone", "12345678"),
+        ("ReceiveSms", "false"),
+        ("ReceiveSms", "true"),
+        ("Address", "Existing address"),
+        ("Country", "dk"),
+        ("command", "confirm"),
+    ]
+    assert client._logged_in
+
+
+@pytest.mark.parametrize(
+    "form",
+    [
+        "<html>Unknown contact page</html>",
+        CONTACT_FORM.replace(
+            'action="/parent/ConfirmContacts"', 'action="https://other.example/collect"'
+        ),
+        CONTACT_FORM.replace(
+            'value="confirm">',
+            'value="confirm" formaction="https://other.example/collect">',
+        ),
+        CONTACT_FORM + CONTACT_FORM,
+    ],
+)
+async def test_contact_confirmation_rejects_unknown_or_unsafe_forms(form: str) -> None:
+    """Do not guess a form or submit contact information to a different host."""
+    session = MagicMock()
+    session.post = AsyncMock()
+    client = FintraClient(session, "school.example", "parent", "secret")
+    with pytest.raises(FintraConnectionError):
+        await client._async_confirm_contacts(
+            FakeResponse("https://school.example/parent/ConfirmContacts", form), form
+        )
+    session.post.assert_not_awaited()
+
+
+async def test_contact_confirmation_does_not_loop_when_rejected() -> None:
+    """A server validation failure must not trigger repeated submissions."""
+    response = FakeResponse(
+        "https://school.example/parent/ConfirmContacts", CONTACT_FORM
+    )
+    session = MagicMock()
+    session.post = AsyncMock(return_value=response)
+    client = FintraClient(session, "school.example", "parent", "secret")
+    with pytest.raises(FintraConnectionError, match="accepterede ikke"):
+        await client._async_confirm_contacts(response, CONTACT_FORM)
+    session.post.assert_awaited_once()
+
+
+@pytest.mark.parametrize("trailing_slash", ["", "/"])
+async def test_login_confirms_contacts_with_existing_session(
+    trailing_slash: str,
+) -> None:
+    """A retained session may reach the contact gate before any login form."""
+    session = MagicMock()
+    session.get = AsyncMock(
+        return_value=FakeResponse(
+            "https://school.example/parent/ConfirmContacts" + trailing_slash,
+            CONTACT_FORM,
+        )
+    )
+    session.post = AsyncMock(
+        return_value=FakeResponse(
+            "https://school.example/parent/712/Vester/Index",
+            '<a href="/parent/712/Vester/Index">Vester</a>',
+        )
+    )
+    client = FintraClient(session, "school.example", "parent", "secret")
+    assert (await client.async_login())[0].key == "712:Vester"
+    session.post.assert_awaited_once()
+    assert "Password" not in dict(session.post.await_args.kwargs["data"])
+
+
+async def test_login_reuses_authenticated_parent_page() -> None:
+    """Daily updates can reuse the session after the contact gate is cleared."""
+    session = MagicMock()
+    session.get = AsyncMock(
+        return_value=FakeResponse(
+            "https://school.example/parent/712/Vester/Index",
+            '<a href="/parent/712/Vester/Index">Vester</a>',
+        )
+    )
+    session.post = AsyncMock()
+    client = FintraClient(session, "school.example", "parent", "secret")
+    assert (await client.async_login())[0].key == "712:Vester"
+    session.post.assert_not_awaited()
+
+
+@pytest.mark.parametrize("status", [403, 500])
+async def test_contact_confirmation_reports_http_errors(status: int) -> None:
+    """Propagate failed confirmations without treating them as successful logins."""
+    session = MagicMock()
+    session.post = AsyncMock(
+        return_value=FakeResponse(
+            "https://school.example/parent/ConfirmContacts", "Error", status
+        )
+    )
+    client = FintraClient(session, "school.example", "parent", "secret")
+    with pytest.raises(FintraConnectionError, match=f"HTTP {status}"):
+        await client._async_confirm_contacts(
+            FakeResponse("https://school.example/parent/ConfirmContacts", CONTACT_FORM),
+            CONTACT_FORM,
+        )
 
 
 @pytest.mark.parametrize(

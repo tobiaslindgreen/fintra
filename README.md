@@ -82,8 +82,12 @@ Adgangskoden gemmes i Home Assistants config-entry-lager på samme måde som
 andre integrationers loginoplysninger. Den skrives aldrig til Fintras log.
 Sessionscookies holdes adskilt pr. konfigureret konto og gemmes ikke af Fintra.
 
-Hvis ForældreIntra beder om bekræftelse af kontaktoplysninger, skal dette først
-gøres manuelt på hjemmesiden. Start derefter opsætningen igen.
+Hvis ForældreIntra beder om bekræftelse af kontaktoplysninger, forsøger Fintra
+automatisk at indsende bekræftelsesformularen med de eksisterende oplysninger.
+Kontaktfelternes værdier og valgte indstillinger bevares, og formularens
+sikkerhedstoken medsendes. Dette gælder både opsætning og de daglige login.
+Hvis formularen ikke kan genkendes, eller skolen afviser bekræftelsen, vises
+en fejl med besked om at kontrollere oplysningerne manuelt på hjemmesiden.
 
 ### 3. Vælg børn
 
