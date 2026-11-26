@@ -86,6 +86,10 @@ Hvis ForældreIntra beder om bekræftelse af kontaktoplysninger, forsøger Fintr
 automatisk at indsende bekræftelsesformularen med de eksisterende oplysninger.
 Kontaktfelternes værdier og valgte indstillinger bevares, og formularens
 sikkerhedstoken medsendes. Dette gælder både opsætning og de daglige login.
+Ved senere opdateringer genkender Fintra også allerede indloggede sider og
+SAML-mellemtrin uden en loginformular. Hvis en gemt session giver et ukendt
+loginforløb, nulstilles kun denne Fintra-kontos cookies, og login prøves én
+gang mere. Afviste adgangskoder eller kontaktbekræftelser gentages ikke.
 Hvis formularen ikke kan genkendes, eller skolen afviser bekræftelsen, vises
 en fejl med besked om at kontrollere oplysningerne manuelt på hjemmesiden.
 

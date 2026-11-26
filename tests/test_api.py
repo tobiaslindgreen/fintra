@@ -286,6 +286,151 @@ async def test_login_reuses_authenticated_parent_page() -> None:
     session.post.assert_not_awaited()
 
 
+@pytest.mark.parametrize("landing_path", ["/", "/parent/", "/parent/712/Vester/Index/"])
+async def test_login_accepts_authenticated_landing_urls(landing_path: str) -> None:
+    """Authenticated root and trailing-slash URLs still provide child links."""
+    session = MagicMock()
+    session.get = AsyncMock(
+        return_value=FakeResponse(
+            "https://school.example" + landing_path,
+            '<a href="/parent/712/Vester/Index">Vester</a>',
+        )
+    )
+    session.post = AsyncMock()
+    client = FintraClient(session, "school.example", "parent", "secret")
+    assert (await client.async_login())[0].key == "712:Vester"
+    session.post.assert_not_awaited()
+    session.cookie_jar.clear.assert_not_called()
+
+
+async def test_next_day_login_starts_with_saml_instead_of_credentials() -> None:
+    """An identity-provider cookie can bypass the credential form next morning."""
+    login = FakeResponse(
+        "https://school.example/Account/IdpLogin",
+        """
+        <form><input name="UserName"><input name="Password"></form>
+    """,
+    )
+    parent = FakeResponse(
+        "https://school.example/parent/712/Vester/Index",
+        '<a href="/parent/712/Vester/Index">Vester</a>',
+    )
+    saml = FakeResponse(
+        "https://school.example/Account/IdpLogin",
+        """
+        <form method="post" action="/sso/assertionconsumerservice">
+          <input name="SAMLResponse" value="fresh-assertion">
+          <input name="RelayState" value="state">
+        </form>
+    """,
+    )
+    session = MagicMock()
+    session.get = AsyncMock(side_effect=[login, saml])
+    session.post = AsyncMock(side_effect=[parent, parent])
+    client = FintraClient(session, "school.example", "parent", "secret")
+    first = await client.async_login()
+    second = await client.async_login()
+    assert first == second
+    assert session.post.await_args_list[1].kwargs["data"] == {
+        "SAMLResponse": "fresh-assertion",
+        "RelayState": "state",
+    }
+    session.cookie_jar.clear.assert_not_called()
+
+
+async def test_saml_at_login_url_is_not_rejected_as_bad_password() -> None:
+    """Login URL alone cannot distinguish credentials from a successful SAML step."""
+    session = MagicMock()
+    session.get = AsyncMock(
+        return_value=FakeResponse(
+            "https://school.example/Account/IdpLogin",
+            '<form><input name="UserName"><input name="Password"></form>',
+        )
+    )
+    session.post = AsyncMock(
+        side_effect=[
+            FakeResponse(
+                "https://school.example/Account/IdpLogin",
+                """
+          <form action="/sso/assertionconsumerservice">
+            <input name="SAMLResponse" value="assertion">
+          </form>""",
+            ),
+            FakeResponse(
+                "https://school.example/parent/712/Vester/Index",
+                '<a href="/parent/712/Vester/Index">Vester</a>',
+            ),
+        ]
+    )
+    client = FintraClient(session, "school.example", "parent", "secret")
+    assert (await client.async_login())[0].key == "712:Vester"
+
+
+async def test_unknown_retained_session_is_reset_once() -> None:
+    """Recover a stale cookie session without requiring an HA restart."""
+    session = MagicMock()
+    session.get = AsyncMock(
+        side_effect=[
+            FakeResponse("https://school.example/SessionExpired", "Expired"),
+            FakeResponse(
+                "https://school.example/Account/IdpLogin",
+                """
+            <form><input name="UserName"><input name="Password"></form>
+        """,
+            ),
+        ]
+    )
+    session.post = AsyncMock(
+        return_value=FakeResponse(
+            "https://school.example/parent/712/Vester/Index",
+            '<a href="/parent/712/Vester/Index">Vester</a>',
+        )
+    )
+    client = FintraClient(session, "school.example", "parent", "secret")
+    assert (await client.async_login())[0].key == "712:Vester"
+    session.cookie_jar.clear.assert_called_once_with()
+    assert session.get.await_count == 2
+
+
+async def test_unknown_session_has_bounded_retry_and_private_error() -> None:
+    """Unknown responses stop after one retry without leaking HTML or query tokens."""
+    session = MagicMock()
+    session.get = AsyncMock(
+        return_value=FakeResponse(
+            "https://school.example/unknown?token=private",
+            "private contact information",
+        )
+    )
+    session.post = AsyncMock()
+    client = FintraClient(session, "school.example", "parent", "secret")
+    with pytest.raises(FintraConnectionError, match="ny session") as error:
+        await client.async_login()
+    assert "private" not in str(error.value)
+    assert "secret" not in str(error.value)
+    assert session.get.await_count == 2
+    session.cookie_jar.clear.assert_called_once_with()
+    session.post.assert_not_awaited()
+    assert not client._logged_in
+
+
+async def test_rejected_credentials_do_not_trigger_cookie_reset() -> None:
+    """A wrong password is reported once rather than retried as a stale session."""
+    session = MagicMock()
+    login = FakeResponse(
+        "https://school.example/Account/IdpLogin",
+        """
+        <form><input name='UserName'><input name='Password'></form>
+    """,
+    )
+    session.get = AsyncMock(return_value=login)
+    session.post = AsyncMock(return_value=login)
+    client = FintraClient(session, "school.example", "parent", "wrong")
+    with pytest.raises(FintraAuthError):
+        await client.async_login()
+    session.cookie_jar.clear.assert_not_called()
+    session.post.assert_awaited_once()
+
+
 @pytest.mark.parametrize("status", [403, 500])
 async def test_contact_confirmation_reports_http_errors(status: int) -> None:
     """Propagate failed confirmations without treating them as successful logins."""

@@ -20,7 +20,6 @@ from .parser import (
     parse_week_plan,
 )
 
-_PARENT_INDEX = re.compile(r"/parent/\d+/[^/]+/Index$")
 _SCHOOL_NAME = re.compile(r"^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$", re.IGNORECASE)
 _SAML_CONSUMER_PATH = "/sso/assertionconsumerservice"
 
@@ -76,43 +75,71 @@ class FintraClient:
         """Log in and return children available to the account."""
         self._logged_in = False
         try:
-            response = await self._session.get(self._base_url, allow_redirects=True)
-            html = await self._read_response(response)
-            path = urlparse(str(response.url)).path
-            if not _PARENT_INDEX.search(path) and not self._is_contact_confirmation(
-                response
-            ):
-                response, html = await self._async_submit_login_form(response, html)
-
-            response, html = await self._async_submit_saml_form(response, html)
-            response, html = await self._async_confirm_contacts(response, html)
+            for attempt in range(2):
+                response = await self._session.get(self._base_url, allow_redirects=True)
+                html = await self._read_response(response)
+                for _ in range(6):
+                    # A retained identity-provider session can return a SAML form
+                    # immediately, without ever displaying the credential form.
+                    next_response, next_html = await self._async_submit_saml_form(
+                        response, html
+                    )
+                    if next_response is not response:
+                        response, html = next_response, next_html
+                        continue
+                    if self._is_contact_confirmation(response):
+                        response, html = await self._async_confirm_contacts(
+                            response, html
+                        )
+                        continue
+                    if self._find_login_form(html) is not None:
+                        response, html = await self._async_submit_login_form(
+                            response, html
+                        )
+                        continue
+                    # Authenticated landing URLs vary (Index, /parent/, child
+                    # selection). Validate the school origin and actual child
+                    # links rather than requiring one exact final URL.
+                    if (
+                        urlparse(str(response.url)).netloc
+                        == urlparse(self._base_url).netloc
+                    ):
+                        children = parse_children(html)
+                        if children:
+                            self._logged_in = True
+                            return children
+                    break
+                if attempt == 0:
+                    # The integration owns a separate CookieJar per account.
+                    # Retry an unknown/looping session once, never rejected
+                    # credentials or contact confirmation failures.
+                    self._session.cookie_jar.clear()
         except ClientError as err:
             raise FintraConnectionError("ForældreIntra kunne ikke kontaktes") from err
+        raise FintraConnectionError(
+            "Loginformularen eller en gyldig forældreside blev ikke fundet, "
+            "heller ikke med en ny session "
+            f"(formularer: {len(BeautifulSoup(html, 'html.parser').find_all('form'))})"
+        )
 
-        final_path = urlparse(str(response.url)).path
-        if not _PARENT_INDEX.search(final_path):
-            raise FintraConnectionError("Loginforløbet havde et ukendt format")
-
-        children = parse_children(html)
-        if not children:
-            raise FintraConnectionError("Ingen børn blev fundet på forsiden")
-        self._logged_in = True
-        return children
-
-    async def _async_submit_login_form(
-        self, response: ClientResponse, html: str
-    ) -> tuple[ClientResponse, str]:
-        """Submit credentials when the existing session needs a fresh login."""
-        soup = BeautifulSoup(html, "html.parser")
-        form = next(
+    @staticmethod
+    def _find_login_form(html: str) -> Any:
+        """Find credentials by form controls, independently of URL or quoting."""
+        return next(
             (
                 candidate
-                for candidate in soup.find_all("form")
+                for candidate in BeautifulSoup(html, "html.parser").find_all("form")
                 if candidate.find(attrs={"name": "UserName"})
                 and candidate.find(attrs={"name": "Password"})
             ),
             None,
         )
+
+    async def _async_submit_login_form(
+        self, response: ClientResponse, html: str
+    ) -> tuple[ClientResponse, str]:
+        """Submit credentials when the existing session needs a fresh login."""
+        form = self._find_login_form(html)
         if form is None:
             raise FintraConnectionError("Loginformularen blev ikke fundet")
         fields = {
@@ -432,6 +459,6 @@ class FintraClient:
 
     @staticmethod
     def _is_login_response(response: ClientResponse, html: str) -> bool:
-        return urlparse(str(response.url)).path == "/Account/IdpLogin" or (
-            'name="UserName"' in html and 'name="Password"' in html
-        )
+        # The identity provider may serve a SAML assertion at the login URL
+        # itself. Only a returned credential form proves login is required.
+        return FintraClient._find_login_form(html) is not None
